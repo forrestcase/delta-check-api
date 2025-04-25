@@ -8,7 +8,7 @@ class ImagePair(BaseModel):
     image1: str
     image2: str
 
-OCR_API_KEY = K88435573088957
+OCR_API_KEY = "K88435573088957"
 
 def extract_text(base64_str: str) -> str:
     url = "https://api.ocr.space/parse/image"
