@@ -1,35 +1,3 @@
-from fastapi import FastAPI, Response
-from pydantic import BaseModel
-import requests
-
-app = FastAPI()
-
-class ImagePair(BaseModel):
-    image1: str
-    image2: str
-
-OCR_API_KEY = "K88435573088957"
-
-def extract_text(base64_str: str) -> str:
-    url = "https://api.ocr.space/parse/image"
-    payload = {
-        "base64Image": f"data:image/jpeg;base64,{base64_str}",
-        "language": "eng",
-        "isOverlayRequired": False,
-        "OCREngine": 2
-    }
-    headers = {
-        "apikey": OCR_API_KEY
-    }
-
-    response = requests.post(url, data=payload, headers=headers)
-    result = response.json()
-
-    try:
-        return result["ParsedResults"][0]["ParsedText"]
-    except (KeyError, IndexError):
-        return "[OCR ERROR: No text extracted]"
-
 @app.post("/deltacheck")
 async def run_delta_check(data: ImagePair):
     try:
@@ -38,22 +6,33 @@ async def run_delta_check(data: ImagePair):
     except Exception as e:
         return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
 
-    # Initialize 114-line output
     lines = [""] * 114
 
-    # Page 2 (top half: lines 0–56)
-    lines[0] = "Rule 1: Pass"
-    lines[1] = "Rule 2: Fail - Missing 'City of'"
-    lines[2] = "Rule 3: Pass"
-    lines[56] = "--- End of Page 2 ---"
+    # Cover identification logic (must match 3 or more out of 5 phrases)
+    cover_phrases = [
+        "CORNER RECORD",
+        "Brief  Legal Description",
+        "County of",
+        "City of",
+        "California"
+    ]
+    score1 = sum(phrase in text1 for phrase in cover_phrases)
+    score2 = sum(phrase in text2 for phrase in cover_phrases)
 
-    # Page 1 (bottom half: lines 57–113)
-    lines[57] = "--- Drawing Page OCR Preview ---"
-    text_lines = text1.splitlines()
-    for i in range(min(3, len(text_lines))):  # show 3 OCR lines
-        lines[58 + i] = text_lines[i]
+    if score1 >= 3 and score2 < 3:
+        lines[0] = "Page 1: Cover"
+        lines[57] = "Page 2: Drawing"
+    elif score2 >= 3 and score1 < 3:
+        lines[0] = "Page 1: Drawing"
+        lines[57] = "Page 2: Cover"
+    elif score1 >= 3 and score2 >= 3:
+        lines[0] = "Page 1: Cover (conflict - both look like Covers)"
+        lines[57] = "Page 2: Cover (conflict - both look like Covers)"
+    else:
+        lines[0] = "Page 1: Drawing (uncertain)"
+        lines[57] = "Page 2: Drawing (uncertain)"
+
+    lines[56] = "--- End of Page 2 ---"
     lines[113] = "--- End of Page 1 ---"
 
-    result = "\n".join(lines)
-    return Response(content=result, media_type="text/plain")
-
+    return Response(content="\n".join(lines), media_type="text/plain")
