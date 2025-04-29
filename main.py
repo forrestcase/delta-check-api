@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Response  # <-- add Response here
+from fastapi import FastAPI, Response
 from pydantic import BaseModel
 import requests
 
@@ -36,9 +36,24 @@ async def run_delta_check(data: ImagePair):
         text1 = extract_text(data.image1)
         text2 = extract_text(data.image2)
     except Exception as e:
-        return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")  # <-- even error response is plain text
+        return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
 
-    result = "Rule 1: Pass\nRule 2: Fail: Missing 'City of'\nRule 3: Pass\n\n--- OCR Text Preview ---\n"
-    result += (text1 + "\n\n" + text2)[:1000]
+    # Initialize 114-line output
+    lines = [""] * 114
 
-    return Response(content=result, media_type="text/plain")  # <-- main success return
+    # Page 2 (top half: lines 0–56)
+    lines[0] = "Rule 1: Pass"
+    lines[1] = "Rule 2: Fail - Missing 'City of'"
+    lines[2] = "Rule 3: Pass"
+    lines[56] = "--- End of Page 2 ---"
+
+    # Page 1 (bottom half: lines 57–113)
+    lines[57] = "--- Drawing Page OCR Preview ---"
+    text_lines = text1.splitlines()
+    for i in range(min(3, len(text_lines))):  # show 3 OCR lines
+        lines[58 + i] = text_lines[i]
+    lines[113] = "--- End of Page 1 ---"
+
+    result = "\n".join(lines)
+    return Response(content=result, media_type="text/plain")
+
