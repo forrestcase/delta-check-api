@@ -2,4 +2,4 @@ fastapi
 uvicorn
 requests
 Pillow
-
+pdf2image
