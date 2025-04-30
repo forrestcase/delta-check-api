@@ -2,7 +2,7 @@ from fastapi import FastAPI, Response
 from pydantic import BaseModel
 import requests
 
-app = FastAPI()  # ✅ This line must be before any @app decorators
+app = FastAPI()
 
 class ImagePair(BaseModel):
     image1: str
@@ -33,13 +33,27 @@ def extract_text(base64_str: str) -> str:
 @app.post("/deltacheck")
 async def run_delta_check(data: ImagePair):
     try:
-        text1 = extract_text(data.image1)
-        text2 = extract_text(data.image2)
+        text1 = extract_text(data.image1)  # assumed drawing
+        text2 = extract_text(data.image2)  # assumed cover
     except Exception as e:
         return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
 
     lines = [""] * 114
+    lines[0] = ""
 
+    # --- LINE 1 and 58: Brief Legal Description (image2 only) ---
+    bld_line = ""
+    for line in text2.splitlines():
+        if "Brief" in line and "Description" in line:
+            bld_line = line.strip()
+            break
+    if not bld_line:
+        caps_lines = [line.strip() for line in text2.splitlines() if line.isupper()]
+        bld_line = max(caps_lines, key=len, default="[Brief Legal Description Not Found]")
+    lines[1] = bld_line
+    lines[58] = bld_line
+
+    # --- LINE 59: COVER or DRAWING based ONLY on image2 ---
     cover_phrases = [
         "CORNER RECORD",
         "Brief  Legal Description",
@@ -47,37 +61,15 @@ async def run_delta_check(data: ImagePair):
         "City of",
         "California"
     ]
+    score_image2 = sum(phrase in text2 for phrase in cover_phrases)
+    lines[59] = "COVER" if score_image2 >= 3 else "DRAWING"
 
-    score1 = sum(phrase in text1 for phrase in cover_phrases)
-    score2 = sum(phrase in text2 for phrase in cover_phrases)
-
-    is_image1_cover = score1 >= 3
-    is_image2_cover = score2 >= 3
-
-    # Identify which image is the Cover to extract BLD from
-    cover_text = text1 if is_image1_cover else text2
-    cover_lines = cover_text.splitlines()
-
-    bld_line = ""
-    for line in cover_lines:
-        if "Brief" in line and "Description" in line:
-            bld_line = line.strip()
-            break
-    if not bld_line:
-        caps_lines = [line.strip() for line in cover_lines if line.isupper()]
-        bld_line = max(caps_lines, key=len, default="[Brief Legal Description Not Found]")
-
-    # Fill the required lines
-    lines[0] = ""
-    lines[1] = bld_line
-    lines[2] = "COVER" if is_image1_cover else "DRAWING"
-    lines[57] = bld_line
-    lines[58] = "COVER" if is_image2_cover else "DRAWING"
-
-    # Fill placeholders for the rest
-    for i in range(3, 57):
-        lines[i] = f"Line {i}:"
-    for i in range(59, 114):
+    # --- Fill the rest with placeholders ---
+    for i in range(2, 58):
+        if i != 57:  # You said line 57 is reserved for font work
+            lines[i] = f"Line {i}:"
+    for i in range(60, 114):
         lines[i] = f"Line {i}:"
 
     return Response(content="\n".join(lines), media_type="text/plain")
+
