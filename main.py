@@ -51,14 +51,23 @@ async def run_delta_check(data: ImagePair):
     except Exception as e:
         return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
 
-    # Determine if which image is the Cover
+    # Determine if each image is Cover or Drawing
     line1 = "Line 1 = Cover" if is_cover_page(text1) else "Line 1 = Drawing"
     line2 = "Line 2 = Cover" if is_cover_page(text2) else "Line 2 = Drawing"
 
-    # Fill lines 3 through 120 with placeholders
-    remaining_lines = [f"Line {i}" for i in range(3, 121)]
+    # First 5 words from each OCR
+    words1 = text1.split()
+    words2 = text2.split()
+    first_5_img1 = " ".join(words1[:5]) if words1 else "[No OCR output]"
+    first_5_img2 = " ".join(words2[:5]) if words2 else "[No OCR output]"
 
-    # Combine all lines
-    all_lines = [line1, line2] + remaining_lines
+    line3 = f"Line 3 = {first_5_img1}"
+    line4 = f"Line 4 = {first_5_img2}"
+
+    # Fill remaining lines
+    remaining_lines = [f"Line {i}" for i in range(5, 121)]
+
+    # Combine all
+    all_lines = [line1, line2, line3, line4] + remaining_lines
 
     return Response(content="\n".join(all_lines), media_type="text/plain")
