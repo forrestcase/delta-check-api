@@ -51,35 +51,33 @@ async def run_delta_check(data: ImagePair):
     score1 = sum(phrase in text1 for phrase in cover_phrases)
     score2 = sum(phrase in text2 for phrase in cover_phrases)
 
-    if score1 >= 3 and score2 < 3:
-        cover_text, drawing_text = text1, text2
-        is_cover_first = True
-    elif score2 >= 3 and score1 < 3:
-        cover_text, drawing_text = text2, text1
-        is_cover_first = False
-    else:
-        cover_text, drawing_text = text1, text2
-        is_cover_first = True  # default fallback
+    is_image1_cover = score1 >= 3
+    is_image2_cover = score2 >= 3
 
-    # Line 0: blank
-    lines[0] = ""
+    # Identify which image is the Cover to extract BLD from
+    cover_text = text1 if is_image1_cover else text2
+    cover_lines = cover_text.splitlines()
 
-    # Line 1: Try to extract Brief Legal Description
     bld_line = ""
-    for line in cover_text.splitlines():
+    for line in cover_lines:
         if "Brief" in line and "Description" in line:
             bld_line = line.strip()
             break
     if not bld_line:
-        caps_lines = [line.strip() for line in cover_text.splitlines() if line.isupper()]
+        caps_lines = [line.strip() for line in cover_lines if line.isupper()]
         bld_line = max(caps_lines, key=len, default="[Brief Legal Description Not Found]")
+
+    # Fill the required lines
+    lines[0] = ""
     lines[1] = bld_line
+    lines[2] = "COVER" if is_image1_cover else "DRAWING"
+    lines[57] = bld_line
+    lines[58] = "COVER" if is_image2_cover else "DRAWING"
 
-    # Line 2: COVER or DRAWING
-    lines[2] = "COVER" if is_cover_first else "DRAWING"
-
-    # Lines 3–113: Just labeled placeholders for now
-    for i in range(3, 114):
+    # Fill placeholders for the rest
+    for i in range(3, 57):
+        lines[i] = f"Line {i}:"
+    for i in range(59, 114):
         lines[i] = f"Line {i}:"
 
     return Response(content="\n".join(lines), media_type="text/plain")
