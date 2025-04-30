@@ -33,43 +33,28 @@ def extract_text(base64_str: str) -> str:
 @app.post("/deltacheck")
 async def run_delta_check(data: ImagePair):
     try:
-        text1 = extract_text(data.image1)  # assumed drawing
-        text2 = extract_text(data.image2)  # assumed cover
+        text1 = extract_text(data.image1)
+        text2 = extract_text(data.image2)
     except Exception as e:
         return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
 
-    lines = [""] * 114
-    lines[0] = ""
+    # Tokenize image1 text
+    words1 = text1.split()
+    first_20_img1 = " ".join(words1[:20])
+    last_20_img1 = " ".join(words1[-20:]) if len(words1) >= 20 else " ".join(words1)
 
-    # --- LINE 1 and 58: Brief Legal Description (image2 only) ---
-    bld_line = ""
-    for line in text2.splitlines():
-        if "Brief" in line and "Description" in line:
-            bld_line = line.strip()
-            break
-    if not bld_line:
-        caps_lines = [line.strip() for line in text2.splitlines() if line.isupper()]
-        bld_line = max(caps_lines, key=len, default="[Brief Legal Description Not Found]")
-    lines[1] = bld_line
-    lines[58] = bld_line
+    # Tokenize image2 text
+    words2 = text2.split()
+    first_20_img2 = " ".join(words2[:20])
+    last_20_img2 = " ".join(words2[-20:]) if len(words2) >= 20 else " ".join(words2)
 
-    # --- LINE 59: COVER or DRAWING based ONLY on image2 ---
-    cover_phrases = [
-        "CORNER RECORD",
-        "Brief  Legal Description",
-        "County of",
-        "City of",
-        "California"
-    ]
-    score_image2 = sum(phrase in text2 for phrase in cover_phrases)
-    lines[59] = "COVER" if score_image2 >= 3 else "DRAWING"
+    # Initialize all lines
+    lines = [f"Line {i}:" for i in range(120)]
 
-    # --- Fill the rest with placeholders ---
-    for i in range(2, 58):
-        if i != 57:  # You said line 57 is reserved for font work
-            lines[i] = f"Line {i}:"
-    for i in range(60, 114):
-        lines[i] = f"Line {i}:"
+    # Populate OCR summaries
+    lines[28] = first_20_img1
+    lines[29] = last_20_img1
+    lines[30] = first_20_img2
+    lines[31] = last_20_img2
 
     return Response(content="\n".join(lines), media_type="text/plain")
-
