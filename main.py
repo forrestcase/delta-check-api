@@ -1,73 +1,84 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
-import requests
+from fastapi.responses import JSONResponse, StreamingResponse
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+import base64
 import asyncio
+from typing import Dict
 
 app = FastAPI()
 
-class ImagePair(BaseModel):
-    image1: str
-    image2: str
+# Temporary in-memory pairing store
+image_store: Dict[str, Dict[int, str]] = {}
 
-OCR_API_KEY = "K88435573088957"
+class PageInput(BaseModel):
+    file_name: str  # e.g. "CornerRecord"
+    page_index: int  # 1 or 2
+    page_base64: str  # base64-encoded JPEG content
 
-def extract_text(base64_str: str) -> str:
-    url = "https://api.ocr.space/parse/image"
-    payload = {
-        "base64Image": f"data:image/jpeg;base64,{base64_str}",
-        "language": "eng",
-        "isOverlayRequired": False,
-        "OCREngine": 2
-    }
-    headers = {
-        "apikey": OCR_API_KEY
-    }
+# Helper: decode base64 image
+def base64_to_image(b64_str: str) -> Image.Image:
+    image_data = base64.b64decode(b64_str)
+    return Image.open(BytesIO(image_data)).convert("RGB")
 
-    response = requests.post(url, data=payload, headers=headers)
-    result = response.json()
+# Helper: encode image as PDF bytes
+def images_to_pdf_bytes(images: list[Image.Image]) -> BytesIO:
+    pdf_buffer = BytesIO()
+    images[0].save(pdf_buffer, format="PDF", save_all=True, append_images=images[1:])
+    pdf_buffer.seek(0)
+    return pdf_buffer
 
+# Helper: overlay placeholder text
+def stamp_image(img: Image.Image, text: str) -> Image.Image:
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+    font_size = int(height * 0.03)
     try:
-        return result["ParsedResults"][0]["ParsedText"]
-    except (KeyError, IndexError):
-        return "[OCR ERROR: No text extracted]"
+        font = ImageFont.truetype("arial.ttf", font_size)
+    except:
+        font = ImageFont.load_default()
+    text_width, text_height = draw.textsize(text, font=font)
+    position = ((width - text_width) // 2, (height - text_height) // 2)
+    draw.text(position, text, fill="red", font=font)
+    return img
 
-def is_cover_page(text: str) -> bool:
-    required_phrases = [
-        "CORNER RECORD",
-        "Brief  Legal Description",
-        "County of",
-        "City of",
-        "California"
-    ]
-    return all(phrase in text for phrase in required_phrases)
+@app.post("/visualreview")
+async def visual_review(data: PageInput, request: Request):
+    # Store the incoming image page
+    file_key = data.file_name
+    page = data.page_index
 
-@app.post("/deltacheck")
-async def run_delta_check(data: ImagePair):
-    await asyncio.sleep(5)  # Initial delay
+    if file_key not in image_store:
+        image_store[file_key] = {}
 
-    try:
-        text1 = extract_text(data.image1)
-        text2 = extract_text(data.image2)
-    except Exception as e:
-        return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
+    image_store[file_key][page] = data.page_base64
 
-    # Determine if each image is Cover or Drawing
-    line1 = "Line 1 = Cover" if is_cover_page(text1) else "Line 1 = Drawing"
-    line2 = "Line 2 = Cover" if is_cover_page(text2) else "Line 2 = Drawing"
+    # Wait until both pages are received
+    if 1 not in image_store[file_key] or 2 not in image_store[file_key]:
+        return JSONResponse(content={"status": "waiting", "message": f"Received page {page}, waiting for other."})
 
-    # First 5 words from each OCR
-    words1 = text1.split()
-    words2 = text2.split()
-    first_5_img1 = " ".join(words1[:5]) if words1 else "[No OCR output]"
-    first_5_img2 = " ".join(words2[:5]) if words2 else "[No OCR output]"
+    # Proceed with processing once both pages exist
+    await asyncio.sleep(2)  # short safety delay
 
-    line3 = f"Line 3 = {first_5_img1}"
-    line4 = f"Line 4 = {first_5_img2}"
+    # Decode both images
+    img1 = base64_to_image(image_store[file_key][1])
+    img2 = base64_to_image(image_store[file_key][2])
 
-    # Fill remaining lines
-    remaining_lines = [f"Line {i}" for i in range(5, 121)]
+    # Placeholder: stamp text on images
+    reviewed_img1 = stamp_image(img1, "Reviewed, ready for rules")
+    reviewed_img2 = stamp_image(img2, "Reviewed, ready for rules")
+    reviewed_images = [reviewed_img1, reviewed_img2]
 
-    # Combine all
-    all_lines = [line1, line2, line3, line4] + remaining_lines
+    # Convert reviewed images to a single PDF
+    pdf_bytes = images_to_pdf_bytes(reviewed_images)
+    pdf_base64 = base64.b64encode(pdf_bytes.read()).decode("utf-8")
 
-    return Response(content="\n".join(all_lines), media_type="text/plain")
+    # Cleanup
+    del image_store[file_key]
+
+    # Return base64-encoded PDF
+    return JSONResponse(content={
+        "file_name": f"{file_key}.pdf",
+        "final_pdf_base64": pdf_base64
+    })
