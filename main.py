@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Response
 from pydantic import BaseModel
 import requests
+import asyncio
 
 app = FastAPI()
 
@@ -30,31 +31,34 @@ def extract_text(base64_str: str) -> str:
     except (KeyError, IndexError):
         return "[OCR ERROR: No text extracted]"
 
+def is_cover_page(text: str) -> bool:
+    required_phrases = [
+        "CORNER RECORD",
+        "Brief  Legal Description",
+        "County of",
+        "City of",
+        "California"
+    ]
+    return all(phrase in text for phrase in required_phrases)
+
 @app.post("/deltacheck")
 async def run_delta_check(data: ImagePair):
+    await asyncio.sleep(5)  # Initial delay
+
     try:
         text1 = extract_text(data.image1)
         text2 = extract_text(data.image2)
     except Exception as e:
         return Response(content=f"OCR failed: {str(e)}", media_type="text/plain")
 
-    # Tokenize image1 text
-    words1 = text1.split()
-    first_20_img1 = " ".join(words1[:20])
-    last_20_img1 = " ".join(words1[-20:]) if len(words1) >= 20 else " ".join(words1)
+    # Determine if which image is the Cover
+    line1 = "Line 1 = Cover" if is_cover_page(text1) else "Line 1 = Drawing"
+    line2 = "Line 2 = Cover" if is_cover_page(text2) else "Line 2 = Drawing"
 
-    # Tokenize image2 text
-    words2 = text2.split()
-    first_20_img2 = " ".join(words2[:20])
-    last_20_img2 = " ".join(words2[-20:]) if len(words2) >= 20 else " ".join(words2)
+    # Fill lines 3 through 120 with placeholders
+    remaining_lines = [f"Line {i}" for i in range(3, 121)]
 
-    # Initialize all lines
-    lines = [f"Line {i}:" for i in range(120)]
+    # Combine all lines
+    all_lines = [line1, line2] + remaining_lines
 
-    # Populate OCR summaries
-    lines[28] = first_20_img1
-    lines[29] = last_20_img1
-    lines[30] = first_20_img2
-    lines[31] = last_20_img2
-
-    return Response(content="\n".join(lines), media_type="text/plain")
+    return Response(content="\n".join(all_lines), media_type="text/plain")
